@@ -10,6 +10,7 @@ Ein einfacher Python-Test, um die SCPI-over-Socket-Verbindung zu einem Siglent S
 - gültige IP-Adresse des Signalgenerators
 
 ## Eigene IP-Adresse anzeigen
-
-```bash
 ip a
+
+ping IP
+nc -vz IP PORT

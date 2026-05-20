@@ -1,0 +1,120 @@
+import socket
+import time
+
+# ============================================================
+# EINSTELLUNGEN
+# ============================================================
+
+# IP-Adresse deines Siglent SSG3000X
+IP = "192.168.1.100"
+
+# SCPI-over-Socket-Port des SSG3000X
+PORT = 5025
+
+# Dauer pro Messpunkt in Sekunden
+WAIT_TIME = 10
+
+# Frequenzen, die getestet werden sollen
+# Diese Werte kannst du einfach ersetzen.
+FREQUENCIES = [
+    "100MHz",
+    "433.92MHz",
+    "868MHz",
+    "1GHz",
+]
+
+# Leistungsbereich des Signalgenerators in dBm
+# Beispiel: -100, -99, -98, ... bis -40 dBm
+POWER_START_DBM = -100
+POWER_STOP_DBM = -40
+POWER_STEP_DB = 1
+
+
+# ============================================================
+# HILFSFUNKTIONEN
+# ============================================================
+
+def send(sock, command):
+    """
+    Sendet einen SCPI-Befehl an den Signalgenerator.
+    Das \n am Ende ist wichtig, damit das Gerät erkennt:
+    Der Befehl ist fertig.
+    """
+    sock.sendall((command + "\n").encode("ascii"))
+    time.sleep(0.1)
+
+
+def query(sock, command):
+    """
+    Sendet eine SCPI-Abfrage und liest die Antwort.
+    Abfragen erkennt man am Fragezeichen, z. B. *IDN? oder :FREQ?
+    """
+    send(sock, command)
+    return sock.recv(4096).decode(errors="ignore").strip()
+
+
+# ============================================================
+# HAUPTPROGRAMM
+# ============================================================
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    # Maximal 5 Sekunden auf Verbindung oder Antwort warten
+    s.settimeout(5)
+
+    # Verbindung zum Siglent herstellen
+    s.connect((IP, PORT))
+
+    # Test: Gerätekennung abfragen
+    print("Verbunden mit:")
+    print(query(s, "*IDN?"))
+
+    # Sicherheit: RF-Ausgang zuerst ausschalten
+    send(s, ":OUTP OFF")
+
+    # Modulation ausschalten, damit ein reiner CW-Träger ausgegeben wird
+    send(s, ":OUTP:MOD OFF")
+
+    try:
+        # Äußere Schleife: Frequenzen durchgehen
+        for freq in FREQUENCIES:
+            print("\n======================================")
+            print(f"Starte Frequenz: {freq}")
+            print("======================================")
+
+            # Frequenz setzen
+            send(s, ":OUTP OFF")
+            send(s, f":FREQ {freq}")
+
+            # Innere Schleife: Leistungen von -100 bis -40 dBm
+            for power_dbm in range(POWER_START_DBM, POWER_STOP_DBM + 1, POWER_STEP_DB):
+                print(f"\nSetze {freq} bei {power_dbm} dBm")
+
+                # Ausgang kurz ausschalten, bevor die Leistung geändert wird
+                send(s, ":OUTP OFF")
+
+                # Leistung setzen
+                send(s, f":POW {power_dbm}dBm")
+
+                # RF-Ausgang einschalten
+                send(s, ":OUTP ON")
+
+                # Werte zurückfragen
+                actual_freq = query(s, ":FREQ?")
+                actual_power = query(s, ":POW?")
+                output_state = query(s, ":OUTP?")
+
+                print(f"Gerät meldet Frequenz: {actual_freq} Hz")
+                print(f"Gerät meldet Leistung: {actual_power} dBm")
+                print(f"RF Output Status: {output_state}")
+                print(f"Warte {WAIT_TIME} Sekunden...")
+
+                # Hier beobachtest du im SDR den dBFS-Wert
+                time.sleep(WAIT_TIME)
+
+    except KeyboardInterrupt:
+        print("\nTest wurde mit Ctrl+C abgebrochen.")
+
+    finally:
+        # Am Ende immer RF-Ausgang ausschalten
+        send(s, ":OUTP OFF")
+        print("\nTest beendet. RF-Ausgang ist AUS.")
